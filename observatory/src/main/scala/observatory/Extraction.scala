@@ -1,15 +1,21 @@
 package observatory
 
 import java.io.File
+import java.nio.file
+import java.nio.file.Paths
 import java.time.LocalDate
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.functions.avg
+import org.apache.spark.sql.{Dataset, Encoder, Encoders, SparkSession}
+import org.apache.spark.sql.types._
 import org.apache.spark.{SparkConf, SparkContext}
 
+import scala.reflect.ClassTag
 import scala.util.Try
 
 case class Station(stn: Option[Int], wban: Option[Int], latitude: Option[Double], longitude: Option[Double])
-case class Temperature(stn: Option[Int], wban: Option[Int], month: Short, day: Short, temperature: Double)
+case class Temperature(stn: Option[Int], wban: Option[Int], month: Int, day: Int, temperature: Double)
 
 trait CsvParser[A] {
   def parse(row: String): A
@@ -36,13 +42,12 @@ object CsvParser {
         Try(tokens(1).toInt).toOption,
         tokens(2).toShort,
         tokens(3).toShort,
-        fahrenheitToCelsius(tokens(4).toDouble)
+        tokens(4).toDouble
       )
     }
 
   }
 
-  @inline def fahrenheitToCelsius(fahrenheit: Double): Double = (fahrenheit - 32d) * 5 / 9
   def as[A](row: String)(implicit A: CsvParser[A]): A = A.parse(row)
 
 }
@@ -53,11 +58,28 @@ object Extraction {
   import org.apache.log4j.{Level, Logger}
   Logger.getLogger("org.apache.spark").setLevel(Level.OFF)
 
-  val conf = new SparkConf().setMaster("local[*]").setAppName("observatory") //.set("spark.driver.host", "localhost")
-  val sc = new SparkContext(conf)
+  implicit def kryoEncoder[A](implicit ct: ClassTag[A]) =
+    org.apache.spark.sql.Encoders.kryo[A](ct)
 
-  var stations : Option[RDD[((Option[Int], Option[Int]), Iterable[Station])]] = None
+  implicit def tuple3[A1, A2, A3](
+    implicit
+      e1: Encoder[A1],
+      e2: Encoder[A2],
+      e3: Encoder[A3]
+  ): Encoder[(A1, A2, A3)] = Encoders.tuple[A1, A2, A3](e1, e2, e3)
 
+
+
+  val session = SparkSession
+    .builder()
+    .appName("observatory")
+    .config("spark.master", "local")
+    .config("spark.driver.host", "localhost")
+    .getOrCreate()
+
+  import session.implicits._
+//  val conf = new SparkConf().setMaster("local[*]").setAppName("observatory") //.set("spark.driver.host", "localhost")
+//  val sc = new SparkContext(conf)
 
   /**
     * @param year             Year number
@@ -66,54 +88,95 @@ object Extraction {
     * @return A sequence containing triplets (date, location, temperature)
     */
   def locateTemperatures(year: Int, stationsFile: String, temperaturesFile: String): Iterable[(LocalDate, Location, Double)] = {
-
-    val stations = stationRDD(stationsFile)
-    val temperatures = temperatureRDD(temperaturesFile)
+    val stations = stationDS(stationsFile)
+    val temperatures = temperatureDS(temperaturesFile)
     stations
-      .join(temperatures)
-      .flatMapValues { case (s, t) =>
-        for {
-          s1 <- s
-          t2 <- t
-        } yield (LocalDate.of(year, t2.month, t2.day), Location(s1.latitude.get, s1.longitude.get), t2.temperature)
-      }
-      .values
+      .join(temperatures, stations("stn") <=> temperatures("stn") && stations("wban") <=> temperatures("wban"))
+      .map(row => {
+        val localDate = LocalDate.of(year, row.getAs[Int]("month"), row.getAs[Int]("day"))
+        val location = Location(row.getAs[Double]("latitude"), row.getAs[Double]("longitude"))
+        val temperature = fahrenheitToCelsius(row.getAs[Double]("temperature"))
+        (localDate, location, temperature)
+      })
       .collect()
   }
 
-  def stationRDD(stationsFile: String): RDD[((Option[Int], Option[Int]), Iterable[Station])] = {
-    stations match {
-      case Some(st) => st
-      case None =>
-        val st = sc.textFile(filePath(stationsFile)).map(CsvParser.as[Station])
-          .filter(station => station.latitude.isDefined && station.longitude.isDefined)
-          .groupBy(station => (station.stn, station.wban))
-          .cache()
-        stations = Some(st)
-        st
-    }
-  }
+  // stn: Option[Int], wban: Option[Int], latitude: Option[Double], longitude: Option[Double]
+  def stationSchema: StructType =
+    StructType(
+      Seq(
+        StructField("stn", IntegerType, true),
+        StructField("wban", IntegerType, true),
+        StructField("latitude", DoubleType, true),
+        StructField("longitude", DoubleType, true)
+      )
+    )
 
-  def temperatureRDD(temperaturesFile: String): RDD[((Option[Int], Option[Int]), Iterable[Temperature])] = {
-    sc.textFile(filePath(temperaturesFile)).map(CsvParser.as[Temperature])
-      .groupBy(temperature => (temperature.stn, temperature.wban))
-  }
+  // stn: Option[Int], wban: Option[Int], month: Short, day: Short, temperature: Double
+  def temperatureSchema: StructType =
+    StructType(
+      Seq(
+        StructField("stn", IntegerType, true),
+        StructField("wban", IntegerType, true),
+        StructField("month", IntegerType, false),
+        StructField("day", IntegerType, false),
+        StructField("temperature", DoubleType, false)
+      )
+    )
+
+
+  def stationDS(stationsFile: String): Dataset[Station] =
+    session
+      .read
+      .option("header", false)
+      .option("mode", "FAILFAST")
+      .schema(stationSchema)
+      .csv(filePath(stationsFile))
+      .as[Station]
+//    loadDataset[Station](filePath(stationsFile), stationSchema)
+    .filter((station: Station) => station.longitude.isDefined && station.latitude.isDefined)
+
+  def temperatureDS(temperatureFile: String): Dataset[Temperature] =
+    session
+      .read
+      .option("header", false)
+      .option("mode", "FAILFAST")
+      .schema(temperatureSchema)
+      .csv(filePath(temperatureFile))
+      .as[Temperature]
+//    loadDataset[Temperature](filePath(temperatureFile), temperatureSchema)
+    .filter((temperature: Temperature) => temperature.temperature != 9999.9)
+
+//  def loadDataset[A](path: String, schema: StructType) =
+//    session
+//      .read
+//      .option("header", false)
+//      .option("mode", "FAILFAST")
+//      .schema(schema)
+//      .csv(path)
+//      .as[A]
+
 
   /**
     * @param records A sequence containing triplets (date, location, temperature)
     * @return A sequence containing, for each location, the average temperature over the year.
     */
-  def locationYearlyAverageRecords(records: RDD[(LocalDate, Location, Double)]): Iterable[(Location, Double)] = {
-    records
-      .groupBy(_._2)
-      .map { case (loc, list)=> loc -> (list.map(_._3).sum / list.size)}
-      .collect()
+  def locationYearlyAverageRecords(records: Iterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] = {
+    session
+      .sparkContext
+      .parallelize(records.toSeq)
+      .toDF("data", "location", "temperature")
+      .groupBy($"location")
+      .agg($"location", avg($"temperature").as("temperature"))
+      .select($"location".as[Location], $"temperature".as[Double])
+      .collect
   }
 
   def filePath(name: String): String =
-    this.getClass.getResource(name).getFile
+    Paths.get(this.getClass.getResource(name).toURI).toString
 
 
+  def fahrenheitToCelsius(fahrenheit: Double): Double = (fahrenheit - 32d) * 5 / 9
 
 
 }

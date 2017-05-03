@@ -25,6 +25,7 @@ class ExtractionTest extends FunSuite {
   val stationFile = "/stations.csv"
   val firstYearFile = "/1975.csv"
 
+  val sc = session.sparkContext
   test("load file with akka") {
     implicit val system = ActorSystem("file-reader")
     implicit val mat = ActorMaterializer()
@@ -141,7 +142,7 @@ class ExtractionTest extends FunSuite {
 
   test("temperature conversion") {
     val fahrenheit = 32f
-    assert(CsvParserfahrenheitToCelsius(fahrenheit) == 0f)
+    assert(fahrenheitToCelsius(fahrenheit) == 0f)
   }
 
 
