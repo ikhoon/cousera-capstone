@@ -56,7 +56,7 @@ object CsvParser {
   */
 object Extraction {
   import org.apache.log4j.{Level, Logger}
-  Logger.getLogger("org.apache.spark").setLevel(Level.OFF)
+  Logger.getLogger("org.apache.spark").setLevel(Level.WARN)
 
   implicit def kryoEncoder[A](implicit ct: ClassTag[A]) =
     org.apache.spark.sql.Encoders.kryo[A](ct)
@@ -78,8 +78,6 @@ object Extraction {
     .getOrCreate()
 
   import session.implicits._
-//  val conf = new SparkConf().setMaster("local[*]").setAppName("observatory") //.set("spark.driver.host", "localhost")
-//  val sc = new SparkContext(conf)
 
   /**
     * @param year             Year number
@@ -133,8 +131,7 @@ object Extraction {
       .schema(stationSchema)
       .csv(filePath(stationsFile))
       .as[Station]
-//    loadDataset[Station](filePath(stationsFile), stationSchema)
-    .filter((station: Station) => station.longitude.isDefined && station.latitude.isDefined)
+      .filter((station: Station) => station.longitude.isDefined && station.latitude.isDefined)
 
   def temperatureDS(temperatureFile: String): Dataset[Temperature] =
     session
@@ -144,24 +141,15 @@ object Extraction {
       .schema(temperatureSchema)
       .csv(filePath(temperatureFile))
       .as[Temperature]
-//    loadDataset[Temperature](filePath(temperatureFile), temperatureSchema)
-    .filter((temperature: Temperature) => temperature.temperature != 9999.9)
+      .filter((temperature: Temperature) => temperature.temperature != 9999.9)
 
-//  def loadDataset[A](path: String, schema: StructType) =
-//    session
-//      .read
-//      .option("header", false)
-//      .option("mode", "FAILFAST")
-//      .schema(schema)
-//      .csv(path)
-//      .as[A]
 
 
   /**
     * @param records A sequence containing triplets (date, location, temperature)
     * @return A sequence containing, for each location, the average temperature over the year.
     */
-  def locationYearlyAverageRecords(records: Iterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] = {
+  def locationYearlyAverageRecords(records: Iterable[(LocalDate, Location, Double)]): Iterable[(Location, Double)] =
     session
       .sparkContext
       .parallelize(records.toSeq)
@@ -170,7 +158,6 @@ object Extraction {
       .agg($"location", avg($"temperature").as("temperature"))
       .select($"location".as[Location], $"temperature".as[Double])
       .collect
-  }
 
   def filePath(name: String): String =
     Paths.get(this.getClass.getResource(name).toURI).toString
