@@ -1,14 +1,12 @@
 package observatory
 
 import com.sksamuel.scrimage.{Image, Pixel}
-import org.slf4j.LoggerFactory
 
 /**
   * 2nd milestone: basic visualization
   */
 object Visualization {
 
-  val logger = LoggerFactory.getLogger(this.getClass)
   import math._
   val power = 2
   /**
@@ -46,9 +44,6 @@ object Visualization {
     * @return The color that corresponds to `value`, according to the color scale defined by `points`
     */
   def interpolateColor(points: Iterable[(Double, Color)], value: Double): Color = {
-//    throw new Exception(points.mkString("################\n", "\n", "\n############ (" + value + ")"))
-    // 255, 0, 0 <=> 0, 0, 255 두개의
-    // 젤 가까운 점을 두개 찾자 그리고 그점의 중간컬러를 찾자.
     val sorted = points.toSeq.sortBy(_._1)
     val gt = sorted.filter(_._1 >= value)
     val max = if(gt.isEmpty) sorted.last else gt.minBy(_._1)
@@ -58,20 +53,29 @@ object Visualization {
     min._2 + delta
   }
 
+  val IMAGE_WIDTH = 360
+  val IMAGE_HEIGHT = 180
   /**
     * @param temperatures Known temperatures
     * @param colors Color scale
     * @return A 360×180 image where each pixel shows the predicted temperature at its location
     */
   def visualize(temperatures: Iterable[(Location, Double)], colors: Iterable[(Double, Color)]): Image = {
-    val pixels: Seq[Pixel] = temperatures.map { case (loc, temp) =>
-      val width = loc.lon + 180
-      val height = (loc.lat - 90) * -1
+    println(temperatures.mkString("\n\n######\n", "\n", "\n######") + colors.mkString("#####\n", "\n", "\n######"))
+    Image(IMAGE_WIDTH, IMAGE_HEIGHT, pixelize(IMAGE_WIDTH, IMAGE_HEIGHT, temperatures, colors).map(_._3).toArray)
+  }
+
+
+  def pixelize(width: Int, height: Int, temperatures: Iterable[(Location, Double)], colors: Iterable[(Double, Color)]): Seq[(Int, Int, Pixel)] = {
+    val centerX = width / 2
+    val centerY = height / 2
+    (0 until width * height).map { i =>
+      val lon = i % width - centerX
+      val lat = -i / width + centerY
+      val temp = predictTemperature(temperatures, Location(lat, lon))
       val color = interpolateColor(colors, temp)
-      (width, height, Pixel(color.red, color.green, color.blue, 1))
-    }.toSeq.sortBy(r => r._1 * 360 + r._2)
-    .map(_._3)
-    Image(360, 180, pixels.toArray)
+      (i % width, i / width, Pixel(color.red, color.green, color.blue, 255))
+    }
   }
 
 }
