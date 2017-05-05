@@ -1,12 +1,14 @@
 package observatory
 
 import com.sksamuel.scrimage.{Image, Pixel}
+import org.slf4j.LoggerFactory
 
 /**
   * 2nd milestone: basic visualization
   */
 object Visualization {
 
+  val logger = LoggerFactory.getLogger(this.getClass)
   import math._
   val power = 2
   /**
@@ -14,23 +16,28 @@ object Visualization {
     * @param location Location where to predict the temperature
     * @return The predicted temperature at `location`
     */
+  // temperature (Location(0.0,0.0),10.0)
+  // location : (Location(90.0,-180.0))
   def predictTemperature(temperatures: Iterable[(Location, Double)], location: Location): Double = {
     val distances = temperatures.map { case (loc, temp) => distance(location, loc) -> temp }
     val nearest = distances.minBy(_._1)
     if (nearest._1 < 1) nearest._2
     else {
       val ws = temperatures.map { case (loc, temp) => (weight(loc, location), temp) }
-      ws.map { case (x , y) => x + y }.sum / ws.map(_._1).sum
+      ws.map { case (x , y) => x * y }.sum / ws.map(_._1).sum
     }
   }
 
   private def weight(x: Location, y: Location): Double =
     1 / pow(distance(x, y), power)
 
-  private def distance(x: Location, y: Location): Double = {
+  def distance(x: Location, y: Location): Double = {
     // d = r * delta sigma
     val radius = 6371
-    val sigma = acos(sin(x.lat) * sin(y.lat) + cos(x.lat) * cos(y.lat) * cos(abs(x.lon - y.lon)))
+    val sigma = acos(
+        sin(x.lat.toRadians) * sin(y.lat.toRadians)
+      + cos(x.lat.toRadians) * cos(y.lat.toRadians) * cos(abs(x.lon.toRadians - y.lon.toRadians))
+    )
     radius * sigma
   }
   /**
@@ -43,8 +50,10 @@ object Visualization {
     // 255, 0, 0 <=> 0, 0, 255 두개의
     // 젤 가까운 점을 두개 찾자 그리고 그점의 중간컬러를 찾자.
     val sorted = points.toSeq.sortBy(_._1)
-    val max = sorted.filter(_._1 >= value).minBy(_._1)
-    val min = sorted.filter(_._1 <= value).maxBy(_._1)
+    val gt = sorted.filter(_._1 >= value)
+    val max = if(gt.isEmpty) sorted.last else gt.minBy(_._1)
+    val lt = sorted.filter(_._1 <= value)
+    val min = if(lt.isEmpty) sorted.head else lt.maxBy(_._1)
     val delta: Color = (max._2 - min._2) * ((value - min._1) / (max._1 - min._1))
     min._2 + delta
   }
@@ -55,12 +64,11 @@ object Visualization {
     * @return A 360×180 image where each pixel shows the predicted temperature at its location
     */
   def visualize(temperatures: Iterable[(Location, Double)], colors: Iterable[(Double, Color)]): Image = {
-    val pixels: Seq[Pixel] = temperatures.map { case (loc, temp) => {
+    val pixels: Seq[Pixel] = temperatures.map { case (loc, temp) =>
       val width = loc.lon + 180
       val height = (loc.lat - 90) * -1
       val color = interpolateColor(colors, temp)
       (width, height, Pixel(color.red, color.green, color.blue, 1))
-      }
     }.toSeq.sortBy(r => r._1 * 360 + r._2)
     .map(_._3)
     Image(360, 180, pixels.toArray)
