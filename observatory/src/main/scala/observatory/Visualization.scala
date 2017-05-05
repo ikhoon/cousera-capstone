@@ -39,11 +39,14 @@ object Visualization {
     * @return The color that corresponds to `value`, according to the color scale defined by `points`
     */
   def interpolateColor(points: Iterable[(Double, Color)], value: Double): Color = {
-    points
-      .toSeq
-      .sortBy(_._1)
-      .foldLeft((Double.MinValue, Color(0, 0, 0))) { case (acc, cur@(temp, color)) => if (value > temp) cur else acc }
-      ._2
+//    throw new Exception(points.mkString("################\n", "\n", "\n############ (" + value + ")"))
+    // 255, 0, 0 <=> 0, 0, 255 두개의
+    // 젤 가까운 점을 두개 찾자 그리고 그점의 중간컬러를 찾자.
+    val sorted = points.toSeq.sortBy(_._1)
+    val max = sorted.filter(_._1 >= value).minBy(_._1)
+    val min = sorted.filter(_._1 <= value).maxBy(_._1)
+    val delta: Color = (max._2 - min._2) * ((value - min._1) / (max._1 - min._1))
+    min._2 + delta
   }
 
   /**
