@@ -51,7 +51,6 @@ object Interaction {
     (x.toInt, y.toInt)
   }
 
-  def show(iterable: Iterable[_]): String = s"${iterable.mkString("Seq(", ",\n", ")\n")}"
 
   /**
     * Generates all the tiles for zoom levels 0 to 3 (included), for all the given years.

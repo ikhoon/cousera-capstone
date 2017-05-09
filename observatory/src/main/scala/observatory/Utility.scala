@@ -6,6 +6,8 @@ package observatory
 object Utility {
   import math._
 
+  def show(marker: String, iterable: Iterable[_]): String = s"## $marker ${iterable.mkString("Seq(", ",\n", ")\n")}"
+
   def locationDistance(x: Location, y: Location): Double = {
     // d = r * delta sigma
     val radius = 6371
